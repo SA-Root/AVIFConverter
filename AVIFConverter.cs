@@ -43,7 +43,56 @@ namespace AVIFConverter
 {
     class ConverterCLI
     {
+        static bool avif = false;
         static List<Tuple<string, string>> CQ = [];
+        static void ListDecoders()
+        {
+            Console.WriteLine("HEVC decoders:");
+            PrintDecoderList(LibHeifInfo.GetDecoderDescriptors(HeifCompressionFormat.Hevc));
+            Console.WriteLine("AV1 decoders:");
+            PrintDecoderList(LibHeifInfo.GetDecoderDescriptors(HeifCompressionFormat.Av1));
+        }
+
+        static void PrintDecoderList(IReadOnlyList<HeifDecoderDescriptor> decoderDescriptors)
+        {
+            for (int i = 0; i < decoderDescriptors.Count; i++)
+            {
+                var decoderDescriptor = decoderDescriptors[i];
+
+                Console.WriteLine("{0} = {1}", decoderDescriptor.IdName, decoderDescriptor.Name);
+            }
+        }
+        static HeifImage LoadHeicImage(string filename)
+        {
+            using var context = new HeifContext(filename);
+            using var primaryImage = context.GetPrimaryImageHandle();
+
+            HeifChroma chroma;
+            bool hasAlpha = primaryImage.HasAlphaChannel;
+            int bitDepth = primaryImage.BitDepth;
+
+            if (bitDepth == 8)
+            {
+                // Console.WriteLine("8 bit");
+                // chroma = hasAlpha ? HeifChroma.InterleavedRgba32 : HeifChroma.InterleavedRgb24;
+                // ListDecoders();
+                chroma = HeifChroma.InterleavedRgba32;
+            }
+            else
+            {
+                // Use the native byte order of the operating system.
+                if (BitConverter.IsLittleEndian)
+                {
+                    chroma = hasAlpha ? HeifChroma.InterleavedRgba64LE : HeifChroma.InterleavedRgb48LE;
+                }
+                else
+                {
+                    chroma = hasAlpha ? HeifChroma.InterleavedRgba64BE : HeifChroma.InterleavedRgb48BE;
+                }
+            }
+
+            return primaryImage.Decode(HeifColorspace.Rgb, chroma);
+        }
         static void ConvertSingleImage(string inputPath, string outputPath,
             HeifEncodingOptions encodingOptions, HeifEncoderDescriptor encoderDescriptor)
         {
@@ -58,11 +107,22 @@ namespace AVIFConverter
             bool writeTwoProfiles = false;
             bool premultiplyAlpha = false;
 
-            using var heifImage = CreateHeifImage(inputPath, lossless, writeTwoProfiles, premultiplyAlpha, out var metadata);
+            if (inputPath.EndsWith("heic"))
+            {
+                using var heifImage = LoadHeicImage(inputPath);
 
-            context.EncodeImage(heifImage, encoder, encodingOptions);
-            context.WriteToFile(outputPath);
-            Console.WriteLine($"Processed: {inputPath}");
+                context.EncodeImage(heifImage, encoder, encodingOptions);
+                context.WriteToFile(outputPath);
+                Console.WriteLine($"Processed: {inputPath}");
+            }
+            else
+            {
+                using var heifImage = CreateHeifImage(inputPath, lossless, writeTwoProfiles, premultiplyAlpha, out var metadata);
+
+                context.EncodeImage(heifImage, encoder, encodingOptions);
+                context.WriteToFile(outputPath);
+                Console.WriteLine($"Processed: {inputPath}");
+            }
         }
         static void CloneFolders(string inputPath, string outputPath)
         {
@@ -74,7 +134,7 @@ namespace AVIFConverter
             }
             foreach (var file in di.GetFiles())
             {
-                string newName = string.Concat(file.Name.AsSpan(0, file.Name.LastIndexOf('.')), ".heic");
+                string newName = string.Concat(file.Name.AsSpan(0, file.Name.LastIndexOf('.')), avif ? ".avif" : ".heic");
                 if (!File.Exists(outputPath + "/" + newName))
                 {
                     CQ.Add(new Tuple<string, string>(file.FullName, outputPath + "/" + newName));
@@ -88,9 +148,10 @@ namespace AVIFConverter
         static void Main(string[] args)
         {
             int quality = 100;
-            bool avif = false;
+
             bool lossless = false;
             bool listEncoders = false;
+            bool listDecoders = false;
             string encoderId = "";
             bool listEncoderParameters = false;
             var encoderParameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -119,6 +180,7 @@ namespace AVIFConverter
                     { "t|thumbnail-bounding-box-size=", "The size of the thumbnail bounding box in pixels.", (v) => thumbnailBoundingBoxSize = int.Parse(v, NumberStyles.Integer, CultureInfo.InvariantCulture) },
                     { "e|encoder=", "Use the specified encoder.", (v) => encoderId = v },
                     { "E|list-encoders", "Show a list of the available encoders.", (v) => listEncoders = v != null },
+                    { "D|list-decoders", "Show a list of the available decoders.", (v) => listDecoders = v != null },
                     { "p|encoder-parameter=", "Set the specified parameter in the encoder settings, uses a key=value format.", (k, v) => encoderParameters.Add(k, v) },
                     { "P|list-encoder-parameters", "Show a list of the available encoder parameters.", (v) => listEncoderParameters = v != null },
                     { "no-alpha", "Do not save the image alpha channel. (default: false)", (v) => saveAlphaChannel = v is null },
@@ -145,6 +207,11 @@ namespace AVIFConverter
                 else if (showVersion)
                 {
                     PrintVersionInfo();
+                    return;
+                }
+                else if (listDecoders)
+                {
+                    ListDecoders();
                     return;
                 }
 
