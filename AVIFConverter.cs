@@ -69,14 +69,15 @@ namespace AVIFConverter
 
             HeifChroma chroma;
             bool hasAlpha = primaryImage.HasAlphaChannel;
+            // Console.WriteLine(hasAlpha);
             int bitDepth = primaryImage.BitDepth;
 
             if (bitDepth == 8)
             {
                 // Console.WriteLine("8 bit");
-                // chroma = hasAlpha ? HeifChroma.InterleavedRgba32 : HeifChroma.InterleavedRgb24;
+                chroma = hasAlpha ? HeifChroma.InterleavedRgba32 : HeifChroma.InterleavedRgb24;
                 // ListDecoders();
-                chroma = HeifChroma.InterleavedRgba32;
+                // chroma = HeifChroma.InterleavedRgba32;
             }
             else
             {
@@ -161,7 +162,7 @@ namespace AVIFConverter
             bool premultiplyAlpha = false;
             int thumbnailBoundingBoxSize = 0;
             string chromaDownsampling = "";
-            string primaryItemDescription = "";
+            string? primaryItemDescription = "";
             bool showHelp = false;
             bool showVersion = false;
             bool batchProcess = false;
@@ -216,7 +217,7 @@ namespace AVIFConverter
                 }
 
                 using var context = new HeifContext();
-                HeifEncoderDescriptor encoderDescriptor = null;
+                HeifEncoderDescriptor encoderDescriptor;
                 var format = avif ? HeifCompressionFormat.Av1 : HeifCompressionFormat.Hevc;
 
                 if (LibHeifInfo.HaveEncoder(format))
@@ -451,8 +452,8 @@ namespace AVIFConverter
                                          bool premultiplyAlpha,
                                          out ImageMetadata metadata)
         {
-            HeifImage heifImage = null;
-            HeifImage temp = null;
+            HeifImage heifImage;
+            HeifImage? temp = null;
 
             try
             {

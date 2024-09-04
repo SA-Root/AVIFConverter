@@ -40,8 +40,8 @@ namespace AVIFConverter
             var colorspace = isGrayscale ? HeifColorspace.Monochrome : HeifColorspace.Rgb;
             var chroma = colorspace == HeifColorspace.Monochrome ? HeifChroma.Monochrome : HeifChroma.InterleavedRgb24;
 
-            HeifImage heifImage = null;
-            HeifImage temp = null;
+            HeifImage heifImage;
+            HeifImage? temp = null;
 
             try
             {
@@ -87,8 +87,8 @@ namespace AVIFConverter
                 chroma = hasTransparency ? HeifChroma.InterleavedRgba32 : HeifChroma.InterleavedRgb24;
             }
 
-            HeifImage heifImage = null;
-            HeifImage temp = null;
+            HeifImage heifImage;
+            HeifImage? temp = null;
 
             try
             {
