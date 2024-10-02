@@ -3,14 +3,18 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <PublishReadyToRun>true</PublishReadyToRun>
     <TieredPGO>true</TieredPGO>
     <PublishAot>true</PublishAot>
-    <PlatformTarget>x64</PlatformTarget>
+    <Product>Vinewood AVIF Converter</Product>
+    <Title>Vinewood AVIF Converter</Title>
+    <Company>Advanced Prototype Dynamics</Company>
+    <FileVersion>1.2.2410.0</FileVersion>
+    <Copyright>Advanced Prototype Dynamics 2024</Copyright>
+    <Version>1.2.2410.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

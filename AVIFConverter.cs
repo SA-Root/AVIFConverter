@@ -36,6 +36,7 @@ using SixLabors.ImageSharp.Metadata;
 using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 
@@ -113,17 +114,15 @@ namespace AVIFConverter
                 using var heifImage = LoadHeicImage(inputPath);
 
                 context.EncodeImage(heifImage, encoder, encodingOptions);
-                context.WriteToFile(outputPath);
-                Console.WriteLine($"Processed: {inputPath}");
             }
             else
             {
-                using var heifImage = CreateHeifImage(inputPath, lossless, writeTwoProfiles, premultiplyAlpha, out var metadata);
-
+                using var heifImage = CreateHeifImage(inputPath, lossless,
+                    writeTwoProfiles, premultiplyAlpha, out var metadata);
                 context.EncodeImage(heifImage, encoder, encodingOptions);
-                context.WriteToFile(outputPath);
-                Console.WriteLine($"Processed: {inputPath}");
             }
+            context.WriteToFile(outputPath);
+            Console.WriteLine($"Processed: {inputPath}");
         }
         static void CloneFolders(string inputPath, string outputPath)
         {
@@ -286,6 +285,7 @@ namespace AVIFConverter
                     string inputPath = remaining[0];
                     string outputPath = remaining[1];
 
+                    //My impl
                     if (batchProcess)
                     {
                         var encodingOptions = new HeifEncodingOptions
@@ -296,8 +296,13 @@ namespace AVIFConverter
 
                         CloneFolders(inputPath, outputPath);
                         Console.WriteLine($"Found {CQ.Count} images.");
+                        var t = Stopwatch.StartNew();
                         Parallel.ForEach(CQ, image => ConvertSingleImage(image.Item1, image.Item2, encodingOptions,
                             encoderDescriptor));
+                        t.Stop();
+                        var ts = t.Elapsed.TotalMilliseconds / 1000.0;
+                        Console.WriteLine($"Total processing time: {ts:N} sec.");
+                        Console.WriteLine($"Average speed: {ts / CQ.Count:N} images/s");
                     }
                     else
                     {
