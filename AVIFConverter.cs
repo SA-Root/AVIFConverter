@@ -302,7 +302,7 @@ namespace AVIFConverter
                         t.Stop();
                         var ts = t.Elapsed.TotalMilliseconds / 1000.0;
                         Console.WriteLine($"Total processing time: {ts:N} sec.");
-                        Console.WriteLine($"Average speed: {ts / CQ.Count:N} images/s");
+                        Console.WriteLine($"Average speed: {CQ.Count / ts:N} images/s");
                     }
                     else
                     {
