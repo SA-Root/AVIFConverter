@@ -297,8 +297,17 @@ namespace AVIFConverter
                         CloneFolders(inputPath, outputPath);
                         Console.WriteLine($"Found {CQ.Count} images.");
                         var t = Stopwatch.StartNew();
-                        Parallel.ForEach(CQ, image => ConvertSingleImage(image.Item1, image.Item2, encodingOptions,
-                            encoderDescriptor));
+                        Parallel.ForEach(CQ, image =>
+                        {
+                            try
+                            {
+                                ConvertSingleImage(image.Item1, image.Item2, encodingOptions, encoderDescriptor);
+                            }
+                            catch (Exception e)
+                            {
+                                Console.WriteLine($"Error: \"{image.Item1}\" {e.Message}");
+                            }
+                        });
                         t.Stop();
                         var ts = t.Elapsed.TotalMilliseconds / 1000.0;
                         Console.WriteLine($"Total processing time: {ts:N} sec.");
