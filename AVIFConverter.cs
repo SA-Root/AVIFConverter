@@ -35,140 +35,139 @@ using SixLabors.ImageSharp.Formats.Tga;
 using SixLabors.ImageSharp.Metadata;
 using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 using SixLabors.ImageSharp.PixelFormats;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 
-namespace AVIFConverter
+namespace AVIFConverter;
+
+class ConverterCLI
 {
-    class ConverterCLI
+    static bool avif = false;
+    static List<Tuple<string, string>> CQ = [];
+    static void ListDecoders()
     {
-        static bool avif = false;
-        static List<Tuple<string, string>> CQ = [];
-        static void ListDecoders()
+        Console.WriteLine("HEVC decoders:");
+        PrintDecoderList(LibHeifInfo.GetDecoderDescriptors(HeifCompressionFormat.Hevc));
+        Console.WriteLine("AV1 decoders:");
+        PrintDecoderList(LibHeifInfo.GetDecoderDescriptors(HeifCompressionFormat.Av1));
+    }
+
+    static void PrintDecoderList(IReadOnlyList<HeifDecoderDescriptor> decoderDescriptors)
+    {
+        for (int i = 0; i < decoderDescriptors.Count; i++)
         {
-            Console.WriteLine("HEVC decoders:");
-            PrintDecoderList(LibHeifInfo.GetDecoderDescriptors(HeifCompressionFormat.Hevc));
-            Console.WriteLine("AV1 decoders:");
-            PrintDecoderList(LibHeifInfo.GetDecoderDescriptors(HeifCompressionFormat.Av1));
+            var decoderDescriptor = decoderDescriptors[i];
+
+            Console.WriteLine("{0} = {1}", decoderDescriptor.IdName, decoderDescriptor.Name);
         }
+    }
+    static HeifImage LoadHeicImage(string filename)
+    {
+        using var context = new HeifContext(filename);
+        using var primaryImage = context.GetPrimaryImageHandle();
 
-        static void PrintDecoderList(IReadOnlyList<HeifDecoderDescriptor> decoderDescriptors)
+        HeifChroma chroma;
+        bool hasAlpha = primaryImage.HasAlphaChannel;
+        // Console.WriteLine(hasAlpha);
+        int bitDepth = primaryImage.BitDepth;
+
+        if (bitDepth == 8)
         {
-            for (int i = 0; i < decoderDescriptors.Count; i++)
-            {
-                var decoderDescriptor = decoderDescriptors[i];
-
-                Console.WriteLine("{0} = {1}", decoderDescriptor.IdName, decoderDescriptor.Name);
-            }
+            // Console.WriteLine("8 bit");
+            chroma = hasAlpha ? HeifChroma.InterleavedRgba32 : HeifChroma.InterleavedRgb24;
+            // ListDecoders();
+            // chroma = HeifChroma.InterleavedRgba32;
         }
-        static HeifImage LoadHeicImage(string filename)
+        else
         {
-            using var context = new HeifContext(filename);
-            using var primaryImage = context.GetPrimaryImageHandle();
-
-            HeifChroma chroma;
-            bool hasAlpha = primaryImage.HasAlphaChannel;
-            // Console.WriteLine(hasAlpha);
-            int bitDepth = primaryImage.BitDepth;
-
-            if (bitDepth == 8)
+            // Use the native byte order of the operating system.
+            if (BitConverter.IsLittleEndian)
             {
-                // Console.WriteLine("8 bit");
-                chroma = hasAlpha ? HeifChroma.InterleavedRgba32 : HeifChroma.InterleavedRgb24;
-                // ListDecoders();
-                // chroma = HeifChroma.InterleavedRgba32;
+                chroma = hasAlpha ? HeifChroma.InterleavedRgba64LE : HeifChroma.InterleavedRgb48LE;
             }
             else
             {
-                // Use the native byte order of the operating system.
-                if (BitConverter.IsLittleEndian)
-                {
-                    chroma = hasAlpha ? HeifChroma.InterleavedRgba64LE : HeifChroma.InterleavedRgb48LE;
-                }
-                else
-                {
-                    chroma = hasAlpha ? HeifChroma.InterleavedRgba64BE : HeifChroma.InterleavedRgb48BE;
-                }
-            }
-
-            return primaryImage.Decode(HeifColorspace.Rgb, chroma);
-        }
-        static void ConvertSingleImage(string inputPath, string outputPath,
-            HeifEncodingOptions encodingOptions, HeifEncoderDescriptor encoderDescriptor)
-        {
-            if (File.Exists(outputPath))
-            {
-                return;
-            }
-            using var context = new HeifContext();
-            using HeifEncoder encoder = context.GetEncoder(encoderDescriptor);
-            encoder.SetLossyQuality(100);
-            bool lossless = false;
-            bool writeTwoProfiles = false;
-            bool premultiplyAlpha = false;
-
-            if (inputPath.EndsWith("heic"))
-            {
-                using var heifImage = LoadHeicImage(inputPath);
-
-                context.EncodeImage(heifImage, encoder, encodingOptions);
-            }
-            else
-            {
-                using var heifImage = CreateHeifImage(inputPath, lossless,
-                    writeTwoProfiles, premultiplyAlpha, out var metadata);
-                context.EncodeImage(heifImage, encoder, encodingOptions);
-            }
-            context.WriteToFile(outputPath);
-            Console.WriteLine($"Processed: {inputPath}");
-        }
-        static void CloneFolders(string inputPath, string outputPath)
-        {
-            DirectoryInfo di = new(inputPath);
-            DirectoryInfo dot = new(outputPath);
-            foreach (var dir in di.GetDirectories())
-            {
-                dot.CreateSubdirectory(dir.Name);
-            }
-            foreach (var file in di.GetFiles())
-            {
-                string newName = string.Concat(file.Name.AsSpan(0, file.Name.LastIndexOf('.')), avif ? ".avif" : ".heic");
-                if (!File.Exists(outputPath + "/" + newName))
-                {
-                    CQ.Add(new Tuple<string, string>(file.FullName, outputPath + "/" + newName));
-                }
-            }
-            foreach (var dir in di.GetDirectories())
-            {
-                CloneFolders(dir.FullName, outputPath + "/" + dir.Name);
+                chroma = hasAlpha ? HeifChroma.InterleavedRgba64BE : HeifChroma.InterleavedRgb48BE;
             }
         }
-        static void Main(string[] args)
+
+        return primaryImage.Decode(HeifColorspace.Rgb, chroma);
+    }
+    static void ConvertSingleImage(string inputPath, string outputPath,
+        HeifEncodingOptions encodingOptions, HeifEncoderDescriptor encoderDescriptor)
+    {
+        if (File.Exists(outputPath))
         {
-            int quality = 100;
+            return;
+        }
+        using var context = new HeifContext();
+        using HeifEncoder encoder = context.GetEncoder(encoderDescriptor);
+        encoder.SetLossyQuality(100);
+        bool lossless = false;
+        bool writeTwoProfiles = false;
+        bool premultiplyAlpha = false;
 
-            bool lossless = false;
-            bool listEncoders = false;
-            bool listDecoders = false;
-            string encoderId = "";
-            bool listEncoderParameters = false;
-            var encoderParameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            bool saveAlphaChannel = true;
-            bool saveThumbnailAlphaChannel = true;
-            bool writeTwoProfiles = false;
-            bool premultiplyAlpha = false;
-            int thumbnailBoundingBoxSize = 0;
-            string chromaDownsampling = "";
-            string? primaryItemDescription = "";
-            bool showHelp = false;
-            bool showVersion = false;
-            bool batchProcess = false;
+        if (inputPath.EndsWith("heic"))
+        {
+            using var heifImage = LoadHeicImage(inputPath);
 
-            try
+            context.EncodeImage(heifImage, encoder, encodingOptions);
+        }
+        else
+        {
+            using var heifImage = CreateHeifImage(inputPath, lossless,
+                writeTwoProfiles, premultiplyAlpha, out var metadata);
+            context.EncodeImage(heifImage, encoder, encodingOptions);
+        }
+        context.WriteToFile(outputPath);
+        Console.WriteLine($"Processed: {inputPath}");
+    }
+    static void CloneFolders(string inputPath, string outputPath)
+    {
+        DirectoryInfo di = new(inputPath);
+        DirectoryInfo dot = new(outputPath);
+        foreach (var dir in di.GetDirectories())
+        {
+            dot.CreateSubdirectory(dir.Name);
+        }
+        foreach (var file in di.GetFiles())
+        {
+            string newName = string.Concat(file.Name.AsSpan(0, file.Name.LastIndexOf('.')), avif ? ".avif" : ".heic");
+            if (!File.Exists(outputPath + "/" + newName))
             {
-                var options = new OptionSet
+                CQ.Add(new Tuple<string, string>(file.FullName, outputPath + "/" + newName));
+            }
+        }
+        foreach (var dir in di.GetDirectories())
+        {
+            CloneFolders(dir.FullName, outputPath + "/" + dir.Name);
+        }
+    }
+    static void Main(string[] args)
+    {
+        int quality = 100;
+
+        bool lossless = false;
+        bool listEncoders = false;
+        bool listDecoders = false;
+        string encoderId = "";
+        bool listEncoderParameters = false;
+        var encoderParameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        bool saveAlphaChannel = true;
+        bool saveThumbnailAlphaChannel = true;
+        bool writeTwoProfiles = false;
+        bool premultiplyAlpha = false;
+        int thumbnailBoundingBoxSize = 0;
+        string chromaDownsampling = "";
+        string? primaryItemDescription = "";
+        bool showHelp = false;
+        bool showVersion = false;
+        bool batchProcess = false;
+
+        try
+        {
+            var options = new OptionSet
                 {
                     "Usage: heif-enc [OPTIONS] input output",
                     "",
@@ -193,497 +192,496 @@ namespace AVIFConverter
                     { "v|version", "Print out the application and library version information and exit.", (v) => showVersion = v != null }
                 };
 
-                var remaining = options.Parse(args);
+            var remaining = options.Parse(args);
 
-                // Register a DllImportResolver to allow for customization of how the runtime
-                // loads the libheif native library.
-                // LibHeifSharpSamples.LibHeifSharpDllImportResolver.Register();
+            // Register a DllImportResolver to allow for customization of how the runtime
+            // loads the libheif native library.
+            // LibHeifSharpSamples.LibHeifSharpDllImportResolver.Register();
 
-                if (showHelp)
+            if (showHelp)
+            {
+                options.WriteOptionDescriptions(Console.Out);
+                return;
+            }
+            else if (showVersion)
+            {
+                PrintVersionInfo();
+                return;
+            }
+            else if (listDecoders)
+            {
+                ListDecoders();
+                return;
+            }
+
+            using var context = new HeifContext();
+            HeifEncoderDescriptor encoderDescriptor;
+            var format = avif ? HeifCompressionFormat.Av1 : HeifCompressionFormat.Hevc;
+
+            if (LibHeifInfo.HaveEncoder(format))
+            {
+                var encoderDescriptors = context.GetEncoderDescriptors(format);
+                // Console.WriteLine(encoderDescriptors.Count);
+
+                if (listEncoders)
+                {
+                    PrintEncoderList(encoderDescriptors);
+                    return;
+                }
+                else
+                {
+                    encoderDescriptor = encoderDescriptors[0];
+                    if (encoderId is not null)
+                    {
+                        for (int i = 0; i < encoderDescriptors.Count; i++)
+                        {
+                            var descriptor = encoderDescriptors[i];
+
+                            if (encoderId.Equals(descriptor.IdName, StringComparison.Ordinal))
+                            {
+                                encoderDescriptor = descriptor;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                string formatName = avif ? "AV1" : "HEVC";
+                Console.WriteLine($"No {formatName} encoder available.");
+                return;
+            }
+
+            using HeifEncoder encoder = context.GetEncoder(encoderDescriptor);
+            if (listEncoderParameters)
+            {
+                PrintEncoderParameterList(encoder);
+            }
+            else
+            {
+                if (remaining.Count != 2)
                 {
                     options.WriteOptionDescriptions(Console.Out);
                     return;
                 }
-                else if (showVersion)
+                else if (quality < 0 || quality > 100)
                 {
-                    PrintVersionInfo();
+                    Console.WriteLine("The quality parameter must be between 0 and 100.");
                     return;
                 }
-                else if (listDecoders)
+                else if (writeTwoProfiles && !LibHeifInfo.CanWriteTwoColorProfiles)
                 {
-                    ListDecoders();
-                    return;
+                    writeTwoProfiles = false;
+                    Console.WriteLine($"Warning: LibHeif version {LibHeifInfo.Version} cannot write two color profiles.");
+                }
+                else if (!string.IsNullOrWhiteSpace(primaryItemDescription) && !LibHeifInfo.HaveVersion(1, 16, 0))
+                {
+                    primaryItemDescription = null;
+                    Console.WriteLine($"Warning: LibHeif version {LibHeifInfo.Version} cannot set a primary item description.");
                 }
 
-                using var context = new HeifContext();
-                HeifEncoderDescriptor encoderDescriptor;
-                var format = avif ? HeifCompressionFormat.Av1 : HeifCompressionFormat.Hevc;
+                string inputPath = remaining[0];
+                string outputPath = remaining[1];
 
-                if (LibHeifInfo.HaveEncoder(format))
+                //My impl
+                if (batchProcess)
                 {
-                    var encoderDescriptors = context.GetEncoderDescriptors(format);
-                    // Console.WriteLine(encoderDescriptors.Count);
+                    var encodingOptions = new HeifEncodingOptions
+                    {
+                        SaveAlphaChannel = true,
+                        WriteTwoColorProfiles = false
+                    };
 
-                    if (listEncoders)
+                    CloneFolders(inputPath, outputPath);
+                    Console.WriteLine($"Found {CQ.Count} images.");
+                    var t = Stopwatch.StartNew();
+                    Parallel.ForEach(CQ, image =>
                     {
-                        PrintEncoderList(encoderDescriptors);
-                        return;
-                    }
-                    else
-                    {
-                        encoderDescriptor = encoderDescriptors[0];
-                        if (encoderId is not null)
+                        try
                         {
-                            for (int i = 0; i < encoderDescriptors.Count; i++)
-                            {
-                                var descriptor = encoderDescriptors[i];
-
-                                if (encoderId.Equals(descriptor.IdName, StringComparison.Ordinal))
-                                {
-                                    encoderDescriptor = descriptor;
-                                    break;
-                                }
-                            }
+                            ConvertSingleImage(image.Item1, image.Item2, encodingOptions, encoderDescriptor);
                         }
-                    }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine($"Error: \"{image.Item1}\" {e.Message}");
+                        }
+                    });
+                    t.Stop();
+                    var ts = t.Elapsed.TotalMilliseconds / 1000.0;
+                    Console.WriteLine($"Total processing time: {ts:N} sec.");
+                    Console.WriteLine($"Average speed: {CQ.Count / ts:N} images/s");
                 }
                 else
                 {
-                    string formatName = avif ? "AV1" : "HEVC";
-                    Console.WriteLine($"No {formatName} encoder available.");
-                    return;
-                }
-
-                using HeifEncoder encoder = context.GetEncoder(encoderDescriptor);
-                if (listEncoderParameters)
-                {
-                    PrintEncoderParameterList(encoder);
-                }
-                else
-                {
-                    if (remaining.Count != 2)
+                    using var heifImage = CreateHeifImage(inputPath, lossless, writeTwoProfiles, premultiplyAlpha, out var metadata);
+                    if (encoderParameters.Count > 0)
                     {
-                        options.WriteOptionDescriptions(Console.Out);
-                        return;
-                    }
-                    else if (quality < 0 || quality > 100)
-                    {
-                        Console.WriteLine("The quality parameter must be between 0 and 100.");
-                        return;
-                    }
-                    else if (writeTwoProfiles && !LibHeifInfo.CanWriteTwoColorProfiles)
-                    {
-                        writeTwoProfiles = false;
-                        Console.WriteLine($"Warning: LibHeif version {LibHeifInfo.Version} cannot write two color profiles.");
-                    }
-                    else if (!string.IsNullOrWhiteSpace(primaryItemDescription) && !LibHeifInfo.HaveVersion(1, 16, 0))
-                    {
-                        primaryItemDescription = null;
-                        Console.WriteLine($"Warning: LibHeif version {LibHeifInfo.Version} cannot set a primary item description.");
-                    }
-
-                    string inputPath = remaining[0];
-                    string outputPath = remaining[1];
-
-                    //My impl
-                    if (batchProcess)
-                    {
-                        var encodingOptions = new HeifEncodingOptions
+                        foreach (var item in encoderParameters)
                         {
-                            SaveAlphaChannel = true,
-                            WriteTwoColorProfiles = false
-                        };
-
-                        CloneFolders(inputPath, outputPath);
-                        Console.WriteLine($"Found {CQ.Count} images.");
-                        var t = Stopwatch.StartNew();
-                        Parallel.ForEach(CQ, image =>
-                        {
-                            try
-                            {
-                                ConvertSingleImage(image.Item1, image.Item2, encodingOptions, encoderDescriptor);
-                            }
-                            catch (Exception e)
-                            {
-                                Console.WriteLine($"Error: \"{image.Item1}\" {e.Message}");
-                            }
-                        });
-                        t.Stop();
-                        var ts = t.Elapsed.TotalMilliseconds / 1000.0;
-                        Console.WriteLine($"Total processing time: {ts:N} sec.");
-                        Console.WriteLine($"Average speed: {CQ.Count / ts:N} images/s");
-                    }
-                    else
-                    {
-                        using var heifImage = CreateHeifImage(inputPath, lossless, writeTwoProfiles, premultiplyAlpha, out var metadata);
-                        if (encoderParameters.Count > 0)
-                        {
-                            foreach (var item in encoderParameters)
-                            {
-                                encoder.SetParameter(item.Key, item.Value);
-                            }
+                            encoder.SetParameter(item.Key, item.Value);
                         }
+                    }
 
-                        encoder.SetLossyQuality(quality);
-                        if (lossless)
+                    encoder.SetLossyQuality(quality);
+                    if (lossless)
+                    {
+                        if (encoderDescriptor.SupportsLosslessCompression)
                         {
-                            if (encoderDescriptor.SupportsLosslessCompression)
-                            {
-                                encoder.SetLossless(true);
-                                // Lossless encoding requires YUV 4:4:4 chroma.
-                                encoder.SetParameter("chroma", "444");
-                            }
-                            else
-                            {
-                                lossless = false;
-                                Console.WriteLine($"Warning: the {encoderDescriptor.IdName} encoder does not support lossless compression, using lossy compression.");
-                            }
-                        }
-
-                        var encodingOptions = new HeifEncodingOptions
-                        {
-                            SaveAlphaChannel = saveAlphaChannel,
-                            WriteTwoColorProfiles = writeTwoProfiles
-                        };
-
-                        if (!string.IsNullOrWhiteSpace(chromaDownsampling))
-                        {
-                            if (LibHeifInfo.HaveVersion(1, 16, 0))
-                            {
-                                if (chromaDownsampling.Equals("nearest-neighbor", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    encodingOptions.ColorConversionOptions.PreferredChromaDownsamplingAlgorithm = HeifChromaDownsamplingAlgorithm.NearestNeighbor;
-                                }
-                                else if (chromaDownsampling.Equals("average", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    encodingOptions.ColorConversionOptions.PreferredChromaDownsamplingAlgorithm = HeifChromaDownsamplingAlgorithm.Average;
-                                }
-                                else if (chromaDownsampling.Equals("sharpyuv", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    encodingOptions.ColorConversionOptions.PreferredChromaDownsamplingAlgorithm = HeifChromaDownsamplingAlgorithm.SharpYuv;
-                                }
-                                else
-                                {
-                                    Console.WriteLine("Invalid chroma downsampling value, it must one of: nearest-neighbor, average or sharpyuv.");
-                                }
-                            }
-                            else
-                            {
-                                Console.WriteLine("The chroma downsampling option will be ignored, it requires LibHeif 1.16.0 or later.");
-                            }
-                        }
-
-                        if (metadata.ExifProfile is null
-                            && metadata.XmpProfile is null
-                            && thumbnailBoundingBoxSize == 0
-                            && string.IsNullOrWhiteSpace(primaryItemDescription))
-                        {
-                            context.EncodeImage(heifImage, encoder, encodingOptions);
+                            encoder.SetLossless(true);
+                            // Lossless encoding requires YUV 4:4:4 chroma.
+                            encoder.SetParameter("chroma", "444");
                         }
                         else
                         {
-                            if (metadata.ExifProfile != null)
-                            {
-                                if (metadata.ExifProfile.TryGetValue(ExifTag.Orientation, out var exifOrientation)
-                                    && Enum.IsDefined((HeifOrientation)exifOrientation.Value))
-                                {
-                                    HeifOrientation heifOrientation = (HeifOrientation)exifOrientation.Value;
+                            lossless = false;
+                            Console.WriteLine($"Warning: the {encoderDescriptor.IdName} encoder does not support lossless compression, using lossy compression.");
+                        }
+                    }
 
-                                    // The encoder will convert the EXIF rotation and flip commands into their HEIF equivalents.
-                                    encodingOptions.ImageOrientation = heifOrientation;
-                                    metadata.ExifProfile.RemoveValue(ExifTag.Orientation);
-                                }
+                    var encodingOptions = new HeifEncodingOptions
+                    {
+                        SaveAlphaChannel = saveAlphaChannel,
+                        WriteTwoColorProfiles = writeTwoProfiles
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(chromaDownsampling))
+                    {
+                        if (LibHeifInfo.HaveVersion(1, 16, 0))
+                        {
+                            if (chromaDownsampling.Equals("nearest-neighbor", StringComparison.OrdinalIgnoreCase))
+                            {
+                                encodingOptions.ColorConversionOptions.PreferredChromaDownsamplingAlgorithm = HeifChromaDownsamplingAlgorithm.NearestNeighbor;
                             }
-
-                            using var imageHandle = context.EncodeImageAndReturnHandle(heifImage, encoder, encodingOptions);
-                            if (metadata.ExifProfile != null)
+                            else if (chromaDownsampling.Equals("average", StringComparison.OrdinalIgnoreCase))
                             {
-                                context.AddExifMetadata(imageHandle, metadata.ExifProfile.ToByteArray());
+                                encodingOptions.ColorConversionOptions.PreferredChromaDownsamplingAlgorithm = HeifChromaDownsamplingAlgorithm.Average;
                             }
-
-                            if (metadata.XmpProfile != null)
+                            else if (chromaDownsampling.Equals("sharpyuv", StringComparison.OrdinalIgnoreCase))
                             {
-                                context.AddXmpMetadata(imageHandle, metadata.XmpProfile.ToByteArray());
+                                encodingOptions.ColorConversionOptions.PreferredChromaDownsamplingAlgorithm = HeifChromaDownsamplingAlgorithm.SharpYuv;
                             }
-
-                            if (thumbnailBoundingBoxSize > 0)
+                            else
                             {
-                                var thumbnailEncodingOptions = new HeifEncodingOptions
-                                {
-                                    SaveAlphaChannel = saveAlphaChannel && saveThumbnailAlphaChannel
-                                };
-
-                                context.EncodeThumbnail(thumbnailBoundingBoxSize, heifImage, imageHandle, encoder, thumbnailEncodingOptions);
-                            }
-
-                            if (!string.IsNullOrWhiteSpace(primaryItemDescription))
-                            {
-                                UserDescriptionProperty userDescription = new UserDescriptionProperty(primaryItemDescription,
-                                                                                                      string.Empty,
-                                                                                                      string.Empty,
-                                                                                                      string.Empty);
-                                context.AddUserDescriptionProperty(imageHandle, userDescription);
+                                Console.WriteLine("Invalid chroma downsampling value, it must one of: nearest-neighbor, average or sharpyuv.");
                             }
                         }
-                        context.WriteToFile(outputPath);
+                        else
+                        {
+                            Console.WriteLine("The chroma downsampling option will be ignored, it requires LibHeif 1.16.0 or later.");
+                        }
                     }
+
+                    if (metadata.ExifProfile is null
+                        && metadata.XmpProfile is null
+                        && thumbnailBoundingBoxSize == 0
+                        && string.IsNullOrWhiteSpace(primaryItemDescription))
+                    {
+                        context.EncodeImage(heifImage, encoder, encodingOptions);
+                    }
+                    else
+                    {
+                        if (metadata.ExifProfile != null)
+                        {
+                            if (metadata.ExifProfile.TryGetValue(ExifTag.Orientation, out var exifOrientation)
+                                && Enum.IsDefined((HeifOrientation)exifOrientation.Value))
+                            {
+                                HeifOrientation heifOrientation = (HeifOrientation)exifOrientation.Value;
+
+                                // The encoder will convert the EXIF rotation and flip commands into their HEIF equivalents.
+                                encodingOptions.ImageOrientation = heifOrientation;
+                                metadata.ExifProfile.RemoveValue(ExifTag.Orientation);
+                            }
+                        }
+
+                        using var imageHandle = context.EncodeImageAndReturnHandle(heifImage, encoder, encodingOptions);
+                        if (metadata.ExifProfile != null)
+                        {
+                            context.AddExifMetadata(imageHandle, metadata.ExifProfile.ToByteArray());
+                        }
+
+                        if (metadata.XmpProfile != null)
+                        {
+                            context.AddXmpMetadata(imageHandle, metadata.XmpProfile.ToByteArray());
+                        }
+
+                        if (thumbnailBoundingBoxSize > 0)
+                        {
+                            var thumbnailEncodingOptions = new HeifEncodingOptions
+                            {
+                                SaveAlphaChannel = saveAlphaChannel && saveThumbnailAlphaChannel
+                            };
+
+                            context.EncodeThumbnail(thumbnailBoundingBoxSize, heifImage, imageHandle, encoder, thumbnailEncodingOptions);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(primaryItemDescription))
+                        {
+                            UserDescriptionProperty userDescription = new UserDescriptionProperty(primaryItemDescription,
+                                                                                                  string.Empty,
+                                                                                                  string.Empty,
+                                                                                                  string.Empty);
+                            context.AddUserDescriptionProperty(imageHandle, userDescription);
+                        }
+                    }
+                    context.WriteToFile(outputPath);
                 }
+            }
 
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex);
-            }
         }
-
-        static void PrintVersionInfo()
+        catch (Exception ex)
         {
-            Console.WriteLine("heif-enc v{0} LibHeifSharp v{1} libheif v{2}",
-                              GetAssemblyFileVersion(typeof(ConverterCLI)),
-                              GetAssemblyFileVersion(typeof(LibHeifInfo)),
-                              LibHeifInfo.Version.ToString(3));
+            Console.WriteLine(ex);
+        }
+    }
 
-            static string GetAssemblyFileVersion(Type type)
-            {
-                var fileVersionAttribute = type.Assembly.GetCustomAttribute<AssemblyFileVersionAttribute>();
+    static void PrintVersionInfo()
+    {
+        Console.WriteLine("heif-enc v{0} LibHeifSharp v{1} libheif v{2}",
+                          GetAssemblyFileVersion(typeof(ConverterCLI)),
+                          GetAssemblyFileVersion(typeof(LibHeifInfo)),
+                          LibHeifInfo.Version.ToString(3));
+
+        static string GetAssemblyFileVersion(Type type)
+        {
+            var fileVersionAttribute = type.Assembly.GetCustomAttribute<AssemblyFileVersionAttribute>();
 
 #pragma warning disable IDE0270 // Use coalesce expression
-                if (fileVersionAttribute is null)
-                {
-                    throw new InvalidOperationException($"Failed to get the AssemblyFileVersion for {type.Assembly.FullName}.");
-                }
+            if (fileVersionAttribute is null)
+            {
+                throw new InvalidOperationException($"Failed to get the AssemblyFileVersion for {type.Assembly.FullName}.");
+            }
 #pragma warning restore IDE0270 // Use coalesce expression
 
-                var trimmedVersion = new Version(fileVersionAttribute.Version);
+            var trimmedVersion = new Version(fileVersionAttribute.Version);
 
-                return trimmedVersion.ToString(3);
-            }
+            return trimmedVersion.ToString(3);
         }
+    }
 
-        static HeifImage CreateHeifImage(string inputPath,
-                                         bool lossless,
-                                         bool writeTwoColorProfiles,
-                                         bool premultiplyAlpha,
-                                         out ImageMetadata metadata)
+    static HeifImage CreateHeifImage(string inputPath,
+                                     bool lossless,
+                                     bool writeTwoColorProfiles,
+                                     bool premultiplyAlpha,
+                                     out ImageMetadata metadata)
+    {
+        HeifImage heifImage;
+        HeifImage? temp = null;
+
+        try
         {
-            HeifImage heifImage;
-            HeifImage? temp = null;
-
-            try
+            if (ImageMayHaveTransparency(inputPath))
             {
-                if (ImageMayHaveTransparency(inputPath))
+                var image = Image.Load<Rgba32>(inputPath);
+                metadata = image.Metadata;
+
+                temp = ImageConversion.ConvertToHeifImage(image, premultiplyAlpha);
+
+                if (temp.HasAlphaChannel && premultiplyAlpha)
                 {
-                    var image = Image.Load<Rgba32>(inputPath);
-                    metadata = image.Metadata;
+                    temp.IsPremultipliedAlpha = true;
+                }
+            }
+            else
+            {
+                var image = Image.Load<Rgb24>(inputPath);
+                metadata = image.Metadata;
 
-                    temp = ImageConversion.ConvertToHeifImage(image, premultiplyAlpha);
+                temp = ImageConversion.ConvertToHeifImage(image);
+            }
 
-                    if (temp.HasAlphaChannel && premultiplyAlpha)
-                    {
-                        temp.IsPremultipliedAlpha = true;
-                    }
+            if (writeTwoColorProfiles && metadata.IccProfile != null)
+            {
+                temp.IccColorProfile = new HeifIccColorProfile(metadata.IccProfile.ToByteArray());
+
+                if (lossless)
+                {
+                    // The Identity matrix coefficient places the RGB values into the YUV planes without any conversion.
+                    // This reduces the compression efficiency, but allows for fully lossless encoding.
+                    temp.NclxColorProfile = new HeifNclxColorProfile(ColorPrimaries.BT709,
+                                                                     TransferCharacteristics.Srgb,
+                                                                     MatrixCoefficients.Identity,
+                                                                     fullRange: true);
                 }
                 else
                 {
-                    var image = Image.Load<Rgb24>(inputPath);
-                    metadata = image.Metadata;
-
-                    temp = ImageConversion.ConvertToHeifImage(image);
+                    temp.NclxColorProfile = new HeifNclxColorProfile(ColorPrimaries.BT709,
+                                                                     TransferCharacteristics.Srgb,
+                                                                     MatrixCoefficients.BT601,
+                                                                     fullRange: true);
                 }
-
-                if (writeTwoColorProfiles && metadata.IccProfile != null)
+            }
+            else
+            {
+                if (lossless)
+                {
+                    // The Identity matrix coefficient places the RGB values into the YUV planes without any conversion.
+                    // This reduces the compression efficiency, but allows for fully lossless encoding.
+                    temp.NclxColorProfile = new HeifNclxColorProfile(ColorPrimaries.BT709,
+                                                                     TransferCharacteristics.Srgb,
+                                                                     MatrixCoefficients.Identity,
+                                                                     fullRange: true);
+                }
+                else if (metadata.IccProfile != null)
                 {
                     temp.IccColorProfile = new HeifIccColorProfile(metadata.IccProfile.ToByteArray());
-
-                    if (lossless)
-                    {
-                        // The Identity matrix coefficient places the RGB values into the YUV planes without any conversion.
-                        // This reduces the compression efficiency, but allows for fully lossless encoding.
-                        temp.NclxColorProfile = new HeifNclxColorProfile(ColorPrimaries.BT709,
-                                                                         TransferCharacteristics.Srgb,
-                                                                         MatrixCoefficients.Identity,
-                                                                         fullRange: true);
-                    }
-                    else
-                    {
-                        temp.NclxColorProfile = new HeifNclxColorProfile(ColorPrimaries.BT709,
-                                                                         TransferCharacteristics.Srgb,
-                                                                         MatrixCoefficients.BT601,
-                                                                         fullRange: true);
-                    }
                 }
                 else
                 {
-                    if (lossless)
-                    {
-                        // The Identity matrix coefficient places the RGB values into the YUV planes without any conversion.
-                        // This reduces the compression efficiency, but allows for fully lossless encoding.
-                        temp.NclxColorProfile = new HeifNclxColorProfile(ColorPrimaries.BT709,
-                                                                         TransferCharacteristics.Srgb,
-                                                                         MatrixCoefficients.Identity,
-                                                                         fullRange: true);
-                    }
-                    else if (metadata.IccProfile != null)
-                    {
-                        temp.IccColorProfile = new HeifIccColorProfile(metadata.IccProfile.ToByteArray());
-                    }
-                    else
-                    {
-                        temp.NclxColorProfile = new HeifNclxColorProfile(ColorPrimaries.BT709,
-                                                                         TransferCharacteristics.Srgb,
-                                                                         MatrixCoefficients.BT601,
-                                                                         fullRange: true);
-                    }
-                }
-
-                heifImage = temp;
-                temp = null;
-            }
-            finally
-            {
-                temp?.Dispose();
-            }
-
-            return heifImage;
-        }
-
-        static bool ImageMayHaveTransparency(string path)
-        {
-            bool mayHaveTransparency = true;
-
-            var imageInfo = Image.Identify(path);
-
-            var imageFormat = imageInfo.Metadata.DecodedImageFormat;
-
-            if (imageFormat is PngFormat)
-            {
-                var pngMeta = imageInfo.Metadata.GetPngMetadata();
-
-                mayHaveTransparency = pngMeta.TransparentColor is null;
-            }
-            else if (imageFormat is JpegFormat)
-            {
-                mayHaveTransparency = false;
-            }
-            else if (imageFormat is BmpFormat)
-            {
-                var bmpMeta = imageInfo.Metadata.GetBmpMetadata();
-
-                mayHaveTransparency = bmpMeta.BitsPerPixel == BmpBitsPerPixel.Pixel32;
-            }
-            else if (imageFormat is TgaFormat)
-            {
-                var tgaMeta = imageInfo.Metadata.GetTgaMetadata();
-
-                mayHaveTransparency = tgaMeta.BitsPerPixel == TgaBitsPerPixel.Pixel32
-                                      && tgaMeta.AlphaChannelBits != 0;
-            }
-
-            return mayHaveTransparency;
-        }
-
-        static void PrintEncoderList(IReadOnlyList<HeifEncoderDescriptor> encoderDescriptors)
-        {
-            for (int i = 0; i < encoderDescriptors.Count; i++)
-            {
-                var encoderDescriptor = encoderDescriptors[i];
-
-                if (i == 0)
-                {
-                    Console.WriteLine($"{encoderDescriptor.IdName} = {encoderDescriptor.Name} [default]");
-                }
-                else
-                {
-                    Console.WriteLine($"{encoderDescriptor.IdName} = {encoderDescriptor.Name}");
+                    temp.NclxColorProfile = new HeifNclxColorProfile(ColorPrimaries.BT709,
+                                                                     TransferCharacteristics.Srgb,
+                                                                     MatrixCoefficients.BT601,
+                                                                     fullRange: true);
                 }
             }
+
+            heifImage = temp;
+            temp = null;
+        }
+        finally
+        {
+            temp?.Dispose();
         }
 
-        static void PrintEncoderParameterList(HeifEncoder encoder)
+        return heifImage;
+    }
+
+    static bool ImageMayHaveTransparency(string path)
+    {
+        bool mayHaveTransparency = true;
+
+        var imageInfo = Image.Identify(path);
+
+        var imageFormat = imageInfo.Metadata.DecodedImageFormat;
+
+        if (imageFormat is PngFormat)
         {
-            var encoderParameters = encoder.EncoderParameters;
+            var pngMeta = imageInfo.Metadata.GetPngMetadata();
 
-            for (int i = 0; i < encoderParameters.Count; i++)
+            mayHaveTransparency = pngMeta.TransparentColor is null;
+        }
+        else if (imageFormat is JpegFormat)
+        {
+            mayHaveTransparency = false;
+        }
+        else if (imageFormat is BmpFormat)
+        {
+            var bmpMeta = imageInfo.Metadata.GetBmpMetadata();
+
+            mayHaveTransparency = bmpMeta.BitsPerPixel == BmpBitsPerPixel.Pixel32;
+        }
+        else if (imageFormat is TgaFormat)
+        {
+            var tgaMeta = imageInfo.Metadata.GetTgaMetadata();
+
+            mayHaveTransparency = tgaMeta.BitsPerPixel == TgaBitsPerPixel.Pixel32
+                                  && tgaMeta.AlphaChannelBits != 0;
+        }
+
+        return mayHaveTransparency;
+    }
+
+    static void PrintEncoderList(IReadOnlyList<HeifEncoderDescriptor> encoderDescriptors)
+    {
+        for (int i = 0; i < encoderDescriptors.Count; i++)
+        {
+            var encoderDescriptor = encoderDescriptors[i];
+
+            if (i == 0)
             {
-                var parameter = encoderParameters[i];
+                Console.WriteLine($"{encoderDescriptor.IdName} = {encoderDescriptor.Name} [default]");
+            }
+            else
+            {
+                Console.WriteLine($"{encoderDescriptor.IdName} = {encoderDescriptor.Name}");
+            }
+        }
+    }
 
-                Console.Write(parameter.Name);
+    static void PrintEncoderParameterList(HeifEncoder encoder)
+    {
+        var encoderParameters = encoder.EncoderParameters;
 
-                switch (parameter.ParameterType)
-                {
-                    case HeifEncoderParameterType.Boolean:
-                        var booleanEncoderParameter = (HeifBooleanEncoderParameter)parameter;
+        for (int i = 0; i < encoderParameters.Count; i++)
+        {
+            var parameter = encoderParameters[i];
 
-                        if (booleanEncoderParameter.HasDefault)
+            Console.Write(parameter.Name);
+
+            switch (parameter.ParameterType)
+            {
+                case HeifEncoderParameterType.Boolean:
+                    var booleanEncoderParameter = (HeifBooleanEncoderParameter)parameter;
+
+                    if (booleanEncoderParameter.HasDefault)
+                    {
+                        Console.Write($", default={booleanEncoderParameter.DefaultValue}");
+                    }
+                    break;
+                case HeifEncoderParameterType.Integer:
+                    var integerEncoderParameter = (HeifIntegerEncoderParameter)parameter;
+
+                    if (integerEncoderParameter.HasDefault)
+                    {
+                        Console.Write($", default={integerEncoderParameter.DefaultValue}");
+                    }
+
+                    if (integerEncoderParameter.HasMinimumMaximum)
+                    {
+                        Console.Write($", [{integerEncoderParameter.Minimum},{integerEncoderParameter.Maximum}]");
+                    }
+
+                    var validIntegerValues = integerEncoderParameter.ValidValues;
+
+                    if (validIntegerValues.Count > 0)
+                    {
+                        Console.Write(", {");
+
+                        for (int j = 0; j < validIntegerValues.Count; j++)
                         {
-                            Console.Write($", default={booleanEncoderParameter.DefaultValue}");
-                        }
-                        break;
-                    case HeifEncoderParameterType.Integer:
-                        var integerEncoderParameter = (HeifIntegerEncoderParameter)parameter;
-
-                        if (integerEncoderParameter.HasDefault)
-                        {
-                            Console.Write($", default={integerEncoderParameter.DefaultValue}");
-                        }
-
-                        if (integerEncoderParameter.HasMinimumMaximum)
-                        {
-                            Console.Write($", [{integerEncoderParameter.Minimum},{integerEncoderParameter.Maximum}]");
-                        }
-
-                        var validIntegerValues = integerEncoderParameter.ValidValues;
-
-                        if (validIntegerValues.Count > 0)
-                        {
-                            Console.Write(", {");
-
-                            for (int j = 0; j < validIntegerValues.Count; j++)
+                            if (j > 0)
                             {
-                                if (j > 0)
-                                {
-                                    Console.Write(',');
-                                }
-
-                                Console.Write(validIntegerValues[j]);
+                                Console.Write(',');
                             }
 
-                            Console.Write('}');
-                        }
-                        break;
-                    case HeifEncoderParameterType.String:
-                        var stringEncoderParameter = (HeifStringEncoderParameter)parameter;
-
-                        if (stringEncoderParameter.HasDefault)
-                        {
-                            Console.Write($", default={stringEncoderParameter.DefaultValue}");
+                            Console.Write(validIntegerValues[j]);
                         }
 
-                        var validStringValues = stringEncoderParameter.ValidValues;
+                        Console.Write('}');
+                    }
+                    break;
+                case HeifEncoderParameterType.String:
+                    var stringEncoderParameter = (HeifStringEncoderParameter)parameter;
 
-                        if (validStringValues.Count > 0)
+                    if (stringEncoderParameter.HasDefault)
+                    {
+                        Console.Write($", default={stringEncoderParameter.DefaultValue}");
+                    }
+
+                    var validStringValues = stringEncoderParameter.ValidValues;
+
+                    if (validStringValues.Count > 0)
+                    {
+                        Console.Write(", {");
+
+                        for (int j = 0; j < validStringValues.Count; j++)
                         {
-                            Console.Write(", {");
-
-                            for (int j = 0; j < validStringValues.Count; j++)
+                            if (j > 0)
                             {
-                                if (j > 0)
-                                {
-                                    Console.Write(',');
-                                }
-
-                                Console.Write(validStringValues[j]);
+                                Console.Write(',');
                             }
 
-                            Console.Write('}');
+                            Console.Write(validStringValues[j]);
                         }
-                        break;
-                    default:
-                        throw new InvalidOperationException($"Unknown {nameof(HeifEncoderParameterType)}, {parameter.ParameterType}.");
-                }
 
-                Console.Write(Environment.NewLine);
+                        Console.Write('}');
+                    }
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unknown {nameof(HeifEncoderParameterType)}, {parameter.ParameterType}.");
             }
+
+            Console.Write(Environment.NewLine);
         }
     }
 }

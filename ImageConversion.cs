@@ -29,216 +29,189 @@ using LibHeifSharp;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
-namespace AVIFConverter
+namespace AVIFConverter;
+
+internal static class ImageConversion
 {
-    internal static class ImageConversion
+    public static HeifImage ConvertToHeifImage(Image<Rgb24> image)
     {
-        public static HeifImage ConvertToHeifImage(Image<Rgb24> image)
+        bool isGrayscale = IsGrayscale(image);
+
+        var colorspace = isGrayscale ? HeifColorspace.Monochrome : HeifColorspace.Rgb;
+        var chroma = colorspace == HeifColorspace.Monochrome ? HeifChroma.Monochrome : HeifChroma.InterleavedRgb24;
+
+        HeifImage heifImage;
+        HeifImage? temp = null;
+
+        try
         {
-            bool isGrayscale = IsGrayscale(image);
-
-            var colorspace = isGrayscale ? HeifColorspace.Monochrome : HeifColorspace.Rgb;
-            var chroma = colorspace == HeifColorspace.Monochrome ? HeifChroma.Monochrome : HeifChroma.InterleavedRgb24;
-
-            HeifImage heifImage;
-            HeifImage? temp = null;
-
-            try
-            {
-                temp = new HeifImage(image.Width, image.Height, colorspace, chroma);
-
-                if (colorspace == HeifColorspace.Monochrome)
-                {
-                    temp.AddPlane(HeifChannel.Y, image.Width, image.Height, 8);
-
-                    CopyGrayscale(image, temp);
-                }
-                else
-                {
-                    temp.AddPlane(HeifChannel.Interleaved, image.Width, image.Height, 8);
-
-                    CopyRgb(image, temp);
-                }
-
-                heifImage = temp;
-                temp = null;
-            }
-            finally
-            {
-                temp?.Dispose();
-            }
-
-            return heifImage;
-        }
-
-        public static HeifImage ConvertToHeifImage(Image<Rgba32> image, bool premultiplyAlpha)
-        {
-            (bool isGrayscale, bool hasTransparency) = AnalyzeImage(image);
-
-            var colorspace = isGrayscale ? HeifColorspace.Monochrome : HeifColorspace.Rgb;
-            HeifChroma chroma;
+            temp = new HeifImage(image.Width, image.Height, colorspace, chroma);
 
             if (colorspace == HeifColorspace.Monochrome)
             {
-                chroma = HeifChroma.Monochrome;
+                temp.AddPlane(HeifChannel.Y, image.Width, image.Height, 8);
+
+                CopyGrayscale(image, temp);
             }
             else
             {
-                chroma = hasTransparency ? HeifChroma.InterleavedRgba32 : HeifChroma.InterleavedRgb24;
+                temp.AddPlane(HeifChannel.Interleaved, image.Width, image.Height, 8);
+
+                CopyRgb(image, temp);
             }
 
-            HeifImage heifImage;
-            HeifImage? temp = null;
-
-            try
-            {
-                temp = new HeifImage(image.Width, image.Height, colorspace, chroma);
-
-                if (colorspace == HeifColorspace.Monochrome)
-                {
-                    temp.AddPlane(HeifChannel.Y, image.Width, image.Height, 8);
-
-                    if (hasTransparency)
-                    {
-                        temp.AddPlane(HeifChannel.Alpha, image.Width, image.Height, 8);
-                    }
-
-                    CopyGrayscale(image, temp, hasTransparency, premultiplyAlpha);
-                }
-                else
-                {
-                    temp.AddPlane(HeifChannel.Interleaved, image.Width, image.Height, 8);
-
-                    CopyRgb(image, temp, hasTransparency, premultiplyAlpha);
-                }
-
-                heifImage = temp;
-                temp = null;
-            }
-            finally
-            {
-                temp?.Dispose();
-            }
-
-            return heifImage;
+            heifImage = temp;
+            temp = null;
+        }
+        finally
+        {
+            temp?.Dispose();
         }
 
-        private static (bool isGrayscale, bool hasTransparency) AnalyzeImage(Image<Rgba32> image)
+        return heifImage;
+    }
+
+    public static HeifImage ConvertToHeifImage(Image<Rgba32> image, bool premultiplyAlpha)
+    {
+        (bool isGrayscale, bool hasTransparency) = AnalyzeImage(image);
+
+        var colorspace = isGrayscale ? HeifColorspace.Monochrome : HeifColorspace.Rgb;
+        HeifChroma chroma;
+
+        if (colorspace == HeifColorspace.Monochrome)
         {
-            bool isGrayscale = true;
-            bool hasTransparency = false;
+            chroma = HeifChroma.Monochrome;
+        }
+        else
+        {
+            chroma = hasTransparency ? HeifChroma.InterleavedRgba32 : HeifChroma.InterleavedRgb24;
+        }
+
+        HeifImage heifImage;
+        HeifImage? temp = null;
+
+        try
+        {
+            temp = new HeifImage(image.Width, image.Height, colorspace, chroma);
+
+            if (colorspace == HeifColorspace.Monochrome)
+            {
+                temp.AddPlane(HeifChannel.Y, image.Width, image.Height, 8);
+
+                if (hasTransparency)
+                {
+                    temp.AddPlane(HeifChannel.Alpha, image.Width, image.Height, 8);
+                }
+
+                CopyGrayscale(image, temp, hasTransparency, premultiplyAlpha);
+            }
+            else
+            {
+                temp.AddPlane(HeifChannel.Interleaved, image.Width, image.Height, 8);
+
+                CopyRgb(image, temp, hasTransparency, premultiplyAlpha);
+            }
+
+            heifImage = temp;
+            temp = null;
+        }
+        finally
+        {
+            temp?.Dispose();
+        }
+
+        return heifImage;
+    }
+
+    private static (bool isGrayscale, bool hasTransparency) AnalyzeImage(Image<Rgba32> image)
+    {
+        bool isGrayscale = true;
+        bool hasTransparency = false;
+
+        image.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < accessor.Height; y++)
+            {
+                var src = accessor.GetRowSpan(y);
+
+                for (int x = 0; x < accessor.Width; x++)
+                {
+                    ref var pixel = ref src[x];
+
+                    if (!(pixel.R == pixel.G && pixel.G == pixel.B))
+                    {
+                        isGrayscale = false;
+                    }
+
+                    if (pixel.A < 255)
+                    {
+                        hasTransparency = true;
+                    }
+                }
+            }
+        });
+
+        return (isGrayscale, hasTransparency);
+    }
+
+    private static unsafe void CopyGrayscale(Image<Rgba32> image,
+                                             HeifImage heifImage,
+                                             bool hasTransparency,
+                                             bool premultiplyAlpha)
+    {
+        var grayPlane = heifImage.GetPlane(HeifChannel.Y);
+
+        byte* grayPlaneScan0 = (byte*)grayPlane.Scan0;
+        int grayPlaneStride = grayPlane.Stride;
+
+        if (hasTransparency)
+        {
+            var alphaPlane = heifImage.GetPlane(HeifChannel.Alpha);
+
+            byte* alphaPlaneScan0 = (byte*)alphaPlane.Scan0;
+            int alphaPlaneStride = alphaPlane.Stride;
 
             image.ProcessPixelRows(accessor =>
             {
                 for (int y = 0; y < accessor.Height; y++)
                 {
                     var src = accessor.GetRowSpan(y);
+                    byte* dst = grayPlaneScan0 + (y * grayPlaneStride);
+                    byte* dstAlpha = alphaPlaneScan0 + (y * alphaPlaneStride);
 
                     for (int x = 0; x < accessor.Width; x++)
                     {
                         ref var pixel = ref src[x];
 
-                        if (!(pixel.R == pixel.G && pixel.G == pixel.B))
+                        if (premultiplyAlpha)
                         {
-                            isGrayscale = false;
+                            switch (pixel.A)
+                            {
+                                case 0:
+                                    dst[0] = 0;
+                                    break;
+                                case 255:
+                                    dst[0] = pixel.R;
+                                    break;
+                                default:
+                                    dst[0] = (byte)MathF.Round((float)pixel.R * pixel.A / 255f);
+                                    break;
+                            }
                         }
+                        else
+                        {
+                            dst[0] = pixel.R;
+                        }
+                        dstAlpha[0] = pixel.A;
 
-                        if (pixel.A < 255)
-                        {
-                            hasTransparency = true;
-                        }
+                        dst++;
+                        dstAlpha++;
                     }
                 }
             });
-
-            return (isGrayscale, hasTransparency);
         }
-
-        private static unsafe void CopyGrayscale(Image<Rgba32> image,
-                                                 HeifImage heifImage,
-                                                 bool hasTransparency,
-                                                 bool premultiplyAlpha)
+        else
         {
-            var grayPlane = heifImage.GetPlane(HeifChannel.Y);
-
-            byte* grayPlaneScan0 = (byte*)grayPlane.Scan0;
-            int grayPlaneStride = grayPlane.Stride;
-
-            if (hasTransparency)
-            {
-                var alphaPlane = heifImage.GetPlane(HeifChannel.Alpha);
-
-                byte* alphaPlaneScan0 = (byte*)alphaPlane.Scan0;
-                int alphaPlaneStride = alphaPlane.Stride;
-
-                image.ProcessPixelRows(accessor =>
-                {
-                    for (int y = 0; y < accessor.Height; y++)
-                    {
-                        var src = accessor.GetRowSpan(y);
-                        byte* dst = grayPlaneScan0 + (y * grayPlaneStride);
-                        byte* dstAlpha = alphaPlaneScan0 + (y * alphaPlaneStride);
-
-                        for (int x = 0; x < accessor.Width; x++)
-                        {
-                            ref var pixel = ref src[x];
-
-                            if (premultiplyAlpha)
-                            {
-                                switch (pixel.A)
-                                {
-                                    case 0:
-                                        dst[0] = 0;
-                                        break;
-                                    case 255:
-                                        dst[0] = pixel.R;
-                                        break;
-                                    default:
-                                        dst[0] = (byte)MathF.Round((float)pixel.R * pixel.A / 255f);
-                                        break;
-                                }
-                            }
-                            else
-                            {
-                                dst[0] = pixel.R;
-                            }
-                            dstAlpha[0] = pixel.A;
-
-                            dst++;
-                            dstAlpha++;
-                        }
-                    }
-                });
-            }
-            else
-            {
-                image.ProcessPixelRows(accessor =>
-                {
-                    for (int y = 0; y < accessor.Height; y++)
-                    {
-                        var src = accessor.GetRowSpan(y);
-                        byte* dst = grayPlaneScan0 + (y * grayPlaneStride);
-
-                        for (int x = 0; x < accessor.Width; x++)
-                        {
-                            ref var pixel = ref src[x];
-
-                            dst[0] = pixel.R;
-
-                            dst++;
-                        }
-                    }
-                });
-            }
-        }
-
-        private static unsafe void CopyGrayscale(Image<Rgb24> image, HeifImage heifImage)
-        {
-            var grayPlane = heifImage.GetPlane(HeifChannel.Y);
-
-            byte* grayPlaneScan0 = (byte*)grayPlane.Scan0;
-            int grayPlaneStride = grayPlane.Stride;
-
             image.ProcessPixelRows(accessor =>
             {
                 for (int y = 0; y < accessor.Height; y++)
@@ -257,95 +230,93 @@ namespace AVIFConverter
                 }
             });
         }
+    }
 
-        private static unsafe void CopyRgb(Image<Rgba32> image,
-                                           HeifImage heifImage,
-                                           bool hasTransparency,
-                                           bool premultiplyAlpha)
+    private static unsafe void CopyGrayscale(Image<Rgb24> image, HeifImage heifImage)
+    {
+        var grayPlane = heifImage.GetPlane(HeifChannel.Y);
+
+        byte* grayPlaneScan0 = (byte*)grayPlane.Scan0;
+        int grayPlaneStride = grayPlane.Stride;
+
+        image.ProcessPixelRows(accessor =>
         {
-            var interleavedData = heifImage.GetPlane(HeifChannel.Interleaved);
-
-            byte* srcScan0 = (byte*)interleavedData.Scan0;
-            int srcStride = interleavedData.Stride;
-
-            if (hasTransparency)
+            for (int y = 0; y < accessor.Height; y++)
             {
-                image.ProcessPixelRows(accessor =>
+                var src = accessor.GetRowSpan(y);
+                byte* dst = grayPlaneScan0 + (y * grayPlaneStride);
+
+                for (int x = 0; x < accessor.Width; x++)
                 {
-                    for (int y = 0; y < accessor.Height; y++)
-                    {
-                        var src = accessor.GetRowSpan(y);
-                        byte* dst = srcScan0 + (y * srcStride);
+                    ref var pixel = ref src[x];
 
-                        for (int x = 0; x < accessor.Width; x++)
-                        {
-                            ref var pixel = ref src[x];
+                    dst[0] = pixel.R;
 
-                            if (premultiplyAlpha)
-                            {
-                                switch (pixel.A)
-                                {
-                                    case 0:
-                                        dst[0] = 0;
-                                        dst[1] = 0;
-                                        dst[2] = 0;
-                                        break;
-                                    case 255:
-                                        dst[0] = pixel.R;
-                                        dst[1] = pixel.G;
-                                        dst[2] = pixel.B;
-                                        break;
-                                    default:
-                                        dst[0] = (byte)MathF.Round((float)pixel.R * pixel.A / 255f);
-                                        dst[1] = (byte)MathF.Round((float)pixel.G * pixel.A / 255f);
-                                        dst[2] = (byte)MathF.Round((float)pixel.B * pixel.A / 255f);
-                                        break;
-                                }
-                            }
-                            else
-                            {
-                                dst[0] = pixel.R;
-                                dst[1] = pixel.G;
-                                dst[2] = pixel.B;
-                            }
-                            dst[3] = pixel.A;
-
-                            dst += 4;
-                        }
-                    }
-                });
+                    dst++;
+                }
             }
-            else
+        });
+    }
+
+    private static unsafe void CopyRgb(Image<Rgba32> image,
+                                       HeifImage heifImage,
+                                       bool hasTransparency,
+                                       bool premultiplyAlpha)
+    {
+        var interleavedData = heifImage.GetPlane(HeifChannel.Interleaved);
+
+        byte* srcScan0 = (byte*)interleavedData.Scan0;
+        int srcStride = interleavedData.Stride;
+
+        if (hasTransparency)
+        {
+            image.ProcessPixelRows(accessor =>
             {
-                image.ProcessPixelRows(accessor =>
+                for (int y = 0; y < accessor.Height; y++)
                 {
-                    for (int y = 0; y < accessor.Height; y++)
+                    var src = accessor.GetRowSpan(y);
+                    byte* dst = srcScan0 + (y * srcStride);
+
+                    for (int x = 0; x < accessor.Width; x++)
                     {
-                        var src = accessor.GetRowSpan(y);
-                        byte* dst = srcScan0 + (y * srcStride);
+                        ref var pixel = ref src[x];
 
-                        for (int x = 0; x < accessor.Width; x++)
+                        if (premultiplyAlpha)
                         {
-                            ref var pixel = ref src[x];
-
+                            switch (pixel.A)
+                            {
+                                case 0:
+                                    dst[0] = 0;
+                                    dst[1] = 0;
+                                    dst[2] = 0;
+                                    break;
+                                case 255:
+                                    dst[0] = pixel.R;
+                                    dst[1] = pixel.G;
+                                    dst[2] = pixel.B;
+                                    break;
+                                default:
+                                    dst[0] = (byte)MathF.Round((float)pixel.R * pixel.A / 255f);
+                                    dst[1] = (byte)MathF.Round((float)pixel.G * pixel.A / 255f);
+                                    dst[2] = (byte)MathF.Round((float)pixel.B * pixel.A / 255f);
+                                    break;
+                            }
+                        }
+                        else
+                        {
                             dst[0] = pixel.R;
                             dst[1] = pixel.G;
                             dst[2] = pixel.B;
-
-                            dst += 3;
                         }
+                        dst[3] = pixel.A;
+
+                        dst += 4;
                     }
-                });
-            }
+                }
+            });
         }
-
-        private static unsafe void CopyRgb(Image<Rgb24> image, HeifImage heifImage)
+        else
         {
-            var interleavedData = heifImage.GetPlane(HeifChannel.Interleaved);
-
-            byte* srcScan0 = (byte*)interleavedData.Scan0;
-            int srcStride = interleavedData.Stride;
-
             image.ProcessPixelRows(accessor =>
             {
                 for (int y = 0; y < accessor.Height; y++)
@@ -366,36 +337,64 @@ namespace AVIFConverter
                 }
             });
         }
+    }
 
-        private static bool IsGrayscale(Image<Rgb24> image)
+    private static unsafe void CopyRgb(Image<Rgb24> image, HeifImage heifImage)
+    {
+        var interleavedData = heifImage.GetPlane(HeifChannel.Interleaved);
+
+        byte* srcScan0 = (byte*)interleavedData.Scan0;
+        int srcStride = interleavedData.Stride;
+
+        image.ProcessPixelRows(accessor =>
         {
-            bool isGrayscale = true;
-
-            image.ProcessPixelRows(accessor =>
+            for (int y = 0; y < accessor.Height; y++)
             {
-                for (int y = 0; y < accessor.Height; y++)
+                var src = accessor.GetRowSpan(y);
+                byte* dst = srcScan0 + (y * srcStride);
+
+                for (int x = 0; x < accessor.Width; x++)
                 {
-                    var src = accessor.GetRowSpan(y);
+                    ref var pixel = ref src[x];
 
-                    for (int x = 0; x < accessor.Width; x++)
+                    dst[0] = pixel.R;
+                    dst[1] = pixel.G;
+                    dst[2] = pixel.B;
+
+                    dst += 3;
+                }
+            }
+        });
+    }
+
+    private static bool IsGrayscale(Image<Rgb24> image)
+    {
+        bool isGrayscale = true;
+
+        image.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < accessor.Height; y++)
+            {
+                var src = accessor.GetRowSpan(y);
+
+                for (int x = 0; x < accessor.Width; x++)
+                {
+                    ref var pixel = ref src[x];
+
+                    if (!(pixel.R == pixel.G && pixel.G == pixel.B))
                     {
-                        ref var pixel = ref src[x];
-
-                        if (!(pixel.R == pixel.G && pixel.G == pixel.B))
-                        {
-                            isGrayscale = false;
-                            break;
-                        }
-                    }
-
-                    if (!isGrayscale)
-                    {
+                        isGrayscale = false;
                         break;
                     }
                 }
-            });
 
-            return isGrayscale;
-        }
+                if (!isGrayscale)
+                {
+                    break;
+                }
+            }
+        });
+
+        return isGrayscale;
     }
 }
