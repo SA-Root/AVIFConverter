@@ -417,7 +417,7 @@ class ConverterCLI
 
                         if (!string.IsNullOrWhiteSpace(primaryItemDescription))
                         {
-                            UserDescriptionProperty userDescription = new UserDescriptionProperty(primaryItemDescription,
+                            UserDescriptionProperty userDescription = new(primaryItemDescription,
                                                                                                   string.Empty,
                                                                                                   string.Empty,
                                                                                                   string.Empty);
@@ -444,15 +444,7 @@ class ConverterCLI
 
         static string GetAssemblyFileVersion(Type type)
         {
-            var fileVersionAttribute = type.Assembly.GetCustomAttribute<AssemblyFileVersionAttribute>();
-
-#pragma warning disable IDE0270 // Use coalesce expression
-            if (fileVersionAttribute is null)
-            {
-                throw new InvalidOperationException($"Failed to get the AssemblyFileVersion for {type.Assembly.FullName}.");
-            }
-#pragma warning restore IDE0270 // Use coalesce expression
-
+            var fileVersionAttribute = type.Assembly.GetCustomAttribute<AssemblyFileVersionAttribute>() ?? throw new InvalidOperationException($"Failed to get the AssemblyFileVersion for {type.Assembly.FullName}.");
             var trimmedVersion = new Version(fileVersionAttribute.Version);
 
             return trimmedVersion.ToString(3);

@@ -185,18 +185,12 @@ internal static class ImageConversion
 
                         if (premultiplyAlpha)
                         {
-                            switch (pixel.A)
+                            dst[0] = pixel.A switch
                             {
-                                case 0:
-                                    dst[0] = 0;
-                                    break;
-                                case 255:
-                                    dst[0] = pixel.R;
-                                    break;
-                                default:
-                                    dst[0] = (byte)MathF.Round((float)pixel.R * pixel.A / 255f);
-                                    break;
-                            }
+                                0 => 0,
+                                255 => pixel.R,
+                                _ => (byte)MathF.Round((float)pixel.R * pixel.A / 255f),
+                            };
                         }
                         else
                         {
